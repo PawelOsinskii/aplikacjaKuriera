@@ -1,12 +1,25 @@
-import sys
+import base64
+import json
 import random
-from os import getenv
-from redis import Redis, StrictRedis
-from bcrypt import hashpw, gensalt, checkpw
-from PySide2 import QtWidgets, QtCore
-from PySide2.QtCore import Slot, Qt, QObject
+import sys
+from os import environ
 import jwt
 import requests
+from PySide2 import QtWidgets
+from PySide2.QtCore import Slot
+from bcrypt import gensalt, checkpw
+from dotenv import load_dotenv
+from redis import StrictRedis
+
+load_dotenv()
+HOST = environ.get('HOST')
+CLIENT_ID = environ.get('CLIENT_ID')
+CLIENT_SECRET = environ.get('CLIENT_SECRET')
+AUDIENCE = environ.get('AUDIENCE')
+OAUTH_HOST = environ.get('OATH_HOST')
+
+import http.client
+
 
 
 class LoginUI(QtWidgets.QMainWindow):
@@ -16,6 +29,7 @@ class LoginUI(QtWidgets.QMainWindow):
         self.login = False
         self.user_name = ''
         self.password = ''
+        self.auth = False
         self.button = []
         self.user_name_label = QtWidgets.QLabel("user name: ")
         self.user_name_le = QtWidgets.QLineEdit()
@@ -30,19 +44,26 @@ class LoginUI(QtWidgets.QMainWindow):
         self.login_button.clicked.connect(self.courier_list_window)
         self.login_button.setMaximumSize(50, 50)
 
+        self.login_button2 = QtWidgets.QPushButton("&login bu auth0", self)
+        self.login_button2.setDisabled(False)
+        self.login_button2.clicked.connect(self.login_by_auth)
+        self.login_button2.setMaximumSize(150, 50)
+
         self.layout = QtWidgets.QFormLayout()
         self.layout.addWidget(self.user_name_label)
         self.layout.addWidget(self.user_name_le)
-        self.jwt_token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWV9.TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ'
+        self.jwt_token = environ.get('SECRET_KEY')
         self.layout.addWidget(self.password_label)
         self.layout.addWidget(self.password_le)
         self.layout.addWidget(self.login_button)
+        self.layout.addWidget(self.login_button2)
 
         widget = QtWidgets.QWidget()
         widget.setLayout(self.layout)
         self.setCentralWidget(widget)
         self.setWindowTitle("Aplikacja zarządzania paczkami")
-        self.resize(600, 240)
+        self.resize(1200, 800)
+        self.setMaximumSize(1200, 800)
 
     @Slot()
     def magic(self):
@@ -51,7 +72,7 @@ class LoginUI(QtWidgets.QMainWindow):
     def status_package(self, i):
 
 
-        link = 'https://pawelosinskiprzesylkiprojekt.herokuapp.com' + str(self.button[i])
+        link = HOST + str(self.button[i])
         encoded_jwt = jwt.encode({'username': 'courier'}, self.jwt_token, algorithm='HS256')
         _jwt = str(encoded_jwt).split("'")
         jwt_ = _jwt[1]
@@ -65,8 +86,8 @@ class LoginUI(QtWidgets.QMainWindow):
     def verify_user(self, username, password):
         salt = gensalt(5)
         password = password.encode()
-        REDIS_HOST = 'ec2-3-121-188-229.eu-central-1.compute.amazonaws.com'
-        REDIS_PASS = 'V&2asU5aDYCFuuvacpSodx8DFjdj$'
+        REDIS_HOST = environ.get('REDIS_HOST')
+        REDIS_PASS = environ.get('REDIS_PASS')
         db = StrictRedis(REDIS_HOST, db=23, password=REDIS_PASS)
         hashed = db.hget(f"courier:{username}", "password")
         if not hashed:
@@ -74,6 +95,11 @@ class LoginUI(QtWidgets.QMainWindow):
             return False
 
         return checkpw(password, hashed)
+
+    def login_by_auth(self):
+        self.auth = True
+        self.courier_list_window()
+        return 0
 
     def courier_list_window(self):
         if not self.login:
@@ -85,9 +111,25 @@ class LoginUI(QtWidgets.QMainWindow):
                 dialog.setStyleSheet("color: red")
                 self.layout.addWidget(dialog)
                 return 0
+            if self.auth:
+                conn = http.client.HTTPSConnection(OAUTH_HOST)
 
-            if self.verify_user(login_text, pass_text):
-                self.login = True
+                payload = "{\"client_id\":\""+CLIENT_ID+"\",\"client_secret\":\""+CLIENT_SECRET+"\",\"audience\":\""+AUDIENCE+"\",\"grant_type\":\"password\",\"username\":\""+login_text+"\",\"password\":\""+pass_text+"\",\"scope\":\"openid\"}"
+
+                headers = {'content-type': "application/json"}
+
+                conn.request("POST", "/oauth/token", payload, headers)
+
+                res = conn.getresponse()
+                new_json = json.load(res)
+                if str(new_json).find("'error': 'invalid_grant'") == -1:
+                    self.login = True
+
+                else:
+                    self.login = False
+            else:
+                if self.verify_user(login_text, pass_text):
+                    self.login = True
 
 
         if self.login:
@@ -99,7 +141,7 @@ class LoginUI(QtWidgets.QMainWindow):
             _jwt = str(encoded_jwt).split("'")
             jwt_ = _jwt[1]
             headers = {"Authorization": "Bearer " + jwt_}
-            r = requests.get('https://pawelosinskiprzesylkiprojekt.herokuapp.com/labels', headers=headers)
+            r = requests.get(HOST + '/labels', headers=headers)
             if r.status_code != 200:
                 dialog = QtWidgets.QMessageBox()
                 dialog.setText("You dont have permission to log on")
