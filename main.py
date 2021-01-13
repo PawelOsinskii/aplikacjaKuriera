@@ -20,7 +20,8 @@ OAUTH_HOST = environ.get('OATH_HOST')
 
 import http.client
 
-
+REDIS_HOST = environ.get('REDIS_HOST')
+REDIS_PASS = environ.get('REDIS_PASS')
 
 class LoginUI(QtWidgets.QMainWindow):
     def __init__(self):
@@ -69,7 +70,7 @@ class LoginUI(QtWidgets.QMainWindow):
     def magic(self):
         self.text.setText(random.choice(self.hello))
 
-    def status_package(self, i):
+    def status_package(self, i, name, id):
 
 
         link = HOST + str(self.button[i])
@@ -80,14 +81,16 @@ class LoginUI(QtWidgets.QMainWindow):
 
         r = requests.put(link, headers = headers)
         print(self.button[i] + r.text)
+        db = StrictRedis(REDIS_HOST, db=23, password=REDIS_PASS)
+        print(f'{name}:notification' + id)
+        db.lpush(f'{name}:notification', id)
         self.courier_list_window()
         text = 'Wszystkie przesyłki'
 
     def verify_user(self, username, password):
         salt = gensalt(5)
         password = password.encode()
-        REDIS_HOST = environ.get('REDIS_HOST')
-        REDIS_PASS = environ.get('REDIS_PASS')
+
         db = StrictRedis(REDIS_HOST, db=23, password=REDIS_PASS)
         hashed = db.hget(f"courier:{username}", "password")
         if not hashed:
@@ -173,7 +176,7 @@ class LoginUI(QtWidgets.QMainWindow):
 
                 button_text = table['_links']['set_status']['href']
                 self.button.append(button_text)
-                self.status_button.clicked.connect(lambda checked=True, x=i: self.status_package(x))
+                self.status_button.clicked.connect(lambda checked=True, x=i, name=table['username'], uid1 = table['uid']: self.status_package(x,name, uid1))
 
                 self.status_button.setDisabled(False)
                 i = i + 1
